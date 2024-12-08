@@ -1,5 +1,7 @@
 # UniStorm: Privacy-Preserving Swaps on Uniswap v4
 
+Video: https://www.youtube.com/watch?v=ReAM0Zc1-xY
+Deck: https://gamma.app/docs/UniStorm-t4964wzmw9vl1hp
 ---
 
 ## Project Overview  
@@ -152,7 +154,7 @@ The main workflow of this repo is:
 
 1. Compile circuits to generate circuit artifacts
 2. Perform a powers of tau ceremony
-3. Generate zkey and verifier Solidity smart contract
+3. Generate proving and verification keys `/circuit_artifacts` and `src/Verifier.sol`
 
 These three steps are written as bash commands in the [makefile](https://github.com/chinmaygopal931/UniStorm/blob/main/makefile). Run the following to perform these steps:
 
@@ -176,3 +178,4 @@ forge test
 ## Credits
 
 Tornado Cash rebuilt by https://github.com/nkrishang here https://github.com/nkrishang/tornado-cash-rebuilt/
+
