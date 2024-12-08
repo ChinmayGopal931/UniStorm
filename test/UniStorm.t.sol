@@ -1,7 +1,5 @@
-// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-// Foundry libraries
 import {Test} from "forge-std/Test.sol";
 import "forge-std/Test.sol";
 
@@ -21,38 +19,54 @@ import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {IERC20Minimal} from "v4-core/interfaces/external/IERC20Minimal.sol";
 
-// Our contracts
 import {UniStorm} from "../src/UniStorm.sol";
 import {TokenETHSwapper} from "../src/WETH.sol";
 
 import {Groth16Verifier} from "src/Verifier.sol";
-import {ETHTornado, IVerifier, IHasher} from "src/ETHTornado.sol";
+import {IVerifier, IHasher} from "src/Tornado.sol";
 
+/* 
+ * Test contract for UniStorm - a privacy-preserving liquidity pool built on Uniswap v4
+ * This contract tests the core functionality including:
+ * - Private deposits and withdrawals
+ * - Token-ETH swaps
+ * - Zero-knowledge proof verification
+ * - Liquidity management
+ */
 contract UniStormTest is Test, Deployers {
-    // Use the libraries
+    // Library usage declarations for Pool management
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
-    IVerifier public verifier;
-    ETHTornado public mixer;
+    // Core protocol contracts
+    IVerifier public verifier; // Handles verification of zero-knowledge proofs
 
-    // Test vars
+    // Test configuration constants
     address public recipient = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
-    address public relayer = address(0);
-    uint256 public fee = 0;
-    uint256 public refund = 0;
+    address public relayer = address(0); // Zero address indicates no relayer
+    uint256 public fee = 0; // No fees for testing
+    uint256 public refund = 0; // No refunds for testing
 
-    // The two currencies (tokens) from the pool
-    Currency token0;
-    Currency token1;
+    // Pool currencies (tokens)
+    Currency token0; // First token in the pool
+    Currency token1; // Second token in the pool
 
-    UniStorm hook;
+    // Core contracts
+    UniStorm hook; // Our privacy-preserving hook
+    TokenETHSwapper public swapper; // Handles token-ETH conversions
 
-    TokenETHSwapper public swapper;
-
+    /*
+     * Test setup: Deploys all necessary contracts and initializes the testing environment
+     * 1. Deploys the MiMC hasher for zero-knowledge proofs
+     * 2. Sets up the Groth16 verifier
+     * 3. Initializes the Tornado Cash mixer
+     * 4. Deploys Uniswap v4 contracts
+     * 5. Sets up test tokens and the ETH swapper
+     * 6. Configures the UniStorm hook with proper permissions
+     */
     function setUp() public {
-        // Deploy MimcSponge hasher contract.
+        // Deploy MimcSponge hasher using node.js script through FFI
         string[] memory inputs = new string[](3);
         inputs[0] = "node";
         inputs[1] = "forge-ffi-scripts/deployMimcsponge.js";
@@ -65,62 +79,50 @@ contract UniStormTest is Test, Deployers {
             if iszero(mimcHasher) { revert(0, 0) }
         }
 
-        // Deploy Groth16 verifier contract.
+        // Initialize verifier for zero-knowledge proofs
         verifier = IVerifier(address(new Groth16Verifier()));
 
-        /**
-         * Deploy Tornado Cash mixer
-         *
-         * - verifier: Groth16 verifier
-         * - hasher: MiMC hasher
-         * - denomination: 1 ETH
-         * - merkleTreeHeight: 20
-         */
-        mixer = new ETHTornado(verifier, IHasher(mimcHasher), 1 ether, 20);
-
-        // Deploy v4 core contracts
+        // Set up Uniswap v4 core infrastructure
         deployFreshManagerAndRouters();
-
-        // Deploy two test tokens
         (token0, token1) = deployMintAndApprove2Currencies();
 
-        // Deploy the swapper after tokens are deployed
+        // Initialize token-ETH swapper and fund it
         swapper = new TokenETHSwapper(Currency.unwrap(token0));
-
-        // Fund swapper with ETH for testing
         vm.deal(address(swapper), 100 ether);
-
-        // Mint and approve tokens for swapper
         MockERC20(Currency.unwrap(token0)).mint(address(swapper), 100 ether);
 
-        // Deploy our hook
+        // Configure hook permissions - only allow specific operations
         uint160 flags =
             uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
-
-        // Explicitly mark the address as payable
         address payable hookAddress = payable(address(flags));
 
+        // Deploy UniStorm hook with all necessary parameters
         deployCodeTo(
             "UniStorm.sol",
-            abi.encode(manager, "", verifier, IHasher(mimcHasher), 1 ether, 20, swapper, 1e18), // Added token denomination
+            abi.encode(manager, "", verifier, IHasher(mimcHasher), 1 ether, 20, swapper, 1e18),
             hookAddress
         );
 
         hook = UniStorm(hookAddress);
 
-        // Initialize a pool with these two tokens, properly capturing both return values
+        // Initialize pool and store key
         PoolKey memory poolKey;
         PoolId poolId;
         (poolKey, poolId) = initPool(token0, token1, hook, 3000, SQRT_PRICE_1_1);
-        key = poolKey; // Store the pool key in our test contract's state variable
+        key = poolKey;
 
-        // Approve our hook address to spend these tokens as well
+        // Set up token approvals for the hook
         MockERC20(Currency.unwrap(token0)).approve(address(hook), type(uint256).max);
         MockERC20(Currency.unwrap(token1)).approve(address(hook), type(uint256).max);
 
+        // Add initial liquidity to the pool
         hook.addLiquidity(key, 1000e18);
     }
 
+    /*
+     * Helper function to deploy MimcSponge hasher contract
+     * Used for zero-knowledge proof generation
+     */
     function deployMimcSponge(bytes memory bytecode) public returns (address) {
         address deployedAddress;
         assembly {
@@ -130,43 +132,25 @@ contract UniStormTest is Test, Deployers {
         return deployedAddress;
     }
 
-    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
-        return this.onERC1155Received.selector;
-    }
-
-    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
-        external
-        pure
-        returns (bytes4)
-    {
-        return this.onERC1155BatchReceived.selector;
-    }
-
+    /*
+     * Generates commitment data for private transactions
+     * Returns tuple of (commitment, nullifier, secret)
+     * Uses external Node.js script through FFI
+     */
     function _getCommitment() internal returns (bytes32 commitment, bytes32 nullifier, bytes32 secret) {
         string[] memory inputs = new string[](2);
         inputs[0] = "node";
         inputs[1] = "forge-ffi-scripts/generateCommitment.js";
 
         bytes memory result = vm.ffi(inputs);
-        (commitment, nullifier, secret) = abi.decode(result, (bytes32, bytes32, bytes32));
-
-        return (commitment, nullifier, secret);
+        return abi.decode(result, (bytes32, bytes32, bytes32));
     }
 
-    function _toHexString(bytes32 value) public pure returns (string memory) {
-        bytes memory alphabet = "0123456789abcdef";
-        bytes memory str = new bytes(66);
-        str[0] = "0";
-        str[1] = "x";
-
-        for (uint256 i = 0; i < 32; i++) {
-            str[2 + i * 2] = alphabet[uint8(value[i] >> 4)];
-            str[3 + i * 2] = alphabet[uint8(value[i] & 0x0f)];
-        }
-
-        return string(str);
-    }
-
+    /*
+     * Generates witness and proof data for private transactions
+     * Uses external Node.js script through FFI
+     * Returns zero-knowledge proof components and transaction details
+     */
     function _getWitnessAndProof(
         bytes32 _nullifier,
         bytes32 _secret,
@@ -189,12 +173,13 @@ contract UniStormTest is Test, Deployers {
         }
 
         bytes memory result = vm.ffi(inputs);
-        (uint256[2] memory pA, uint256[2][2] memory pB, uint256[2] memory pC, bytes32 root, bytes32 nullifierHash) =
-            abi.decode(result, (uint256[2], uint256[2][2], uint256[2], bytes32, bytes32));
-
-        return (pA, pB, pC, root, nullifierHash);
+        return abi.decode(result, (uint256[2], uint256[2][2], uint256[2], bytes32, bytes32));
     }
 
+    /*
+     * Tests that direct liquidity modification is blocked
+     * All liquidity changes must go through the hook
+     */
     function test_cannotModifyLiquidity() public {
         vm.expectRevert();
         modifyLiquidityRouter.modifyLiquidity(
@@ -204,92 +189,135 @@ contract UniStormTest is Test, Deployers {
         );
     }
 
+    /*
+     * Tests ETH deposit functionality
+     * Verifies:
+     * - Deposit amount is correct
+     * - Commitment is properly stored
+     * - Deposit state is properly tracked
+     * - Timestamp is recorded
+     */
     function test_eth_deposit() public {
-        // Prepare test data
         uint256 depositAmount = 1 ether;
         (bytes32 commitment, bytes32 nullifier, bytes32 secret) = _getCommitment();
 
-        // Make ETH deposit
         hook.deposit{value: 1 ether}(Currency.wrap(address(0)), 1 ether, commitment);
 
-        // Verify deposit state - Note we're using Currency.wrap(address(0)) to check ETH deposits
         (uint256 amount, bytes32 storedCommitment, bool isDeposited, Currency token, uint256 timestamp) =
             hook.deposits(Currency.wrap(address(0)), commitment);
 
         assertEq(amount, depositAmount, "Incorrect deposit amount");
         assertEq(storedCommitment, commitment, "Incorrect commitment stored");
         assertTrue(isDeposited, "Deposit not marked as deposited");
-        assertEq(Currency.unwrap(token), address(0), "Incorrect token stored"); // Should be address(0) for ETH
+        assertEq(Currency.unwrap(token), address(0), "Incorrect token stored");
         assertEq(timestamp, block.timestamp, "Incorrect timestamp");
     }
 
+    /*
+     * Tests complete private ETH swap flow
+     * Steps:
+     * 1. Generate commitment and make deposit
+     * 2. Generate proof for withdrawal
+     * 3. Execute private swap
+     * 4. Verify balances and state changes
+     */
     function test_private_eth_swap_flow() public {
-        // 1. Generate commitment for deposit
+        // Generate commitment and deposit ETH
         (bytes32 commitment, bytes32 nullifier, bytes32 secret) = _getCommitment();
-
-        // hook.deposit{value: 1 ether}(token0, 1e18, commitment);
         hook.deposit{value: 1 ether}(Currency.wrap(address(0)), 1 ether, commitment);
 
-        // 3. Generate proof for withdrawal
+        // Generate proof for withdrawal
         bytes32[] memory leaves = new bytes32[](1);
         leaves[0] = commitment;
 
         (uint256[2] memory pA, uint256[2][2] memory pB, uint256[2] memory pC, bytes32 root, bytes32 nullifierHash) =
             _getWitnessAndProof(nullifier, secret, recipient, relayer, leaves);
 
-        PoolSwapTest.TestSettings memory settings =
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
-
-        // 4. Prepare swap parameters
+        // Prepare swap parameters
         IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
             zeroForOne: true,
             amountSpecified: -1e18,
             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
         });
 
-        // 5. Encode proof data
+        // Encode proof data
         bytes memory proofData = abi.encode(pA, pB, pC, root, nullifierHash, recipient, relayer);
 
+        // Record initial balances
         uint256 balanceBefore0 = MockERC20(Currency.unwrap(key.currency0)).balanceOf(address((this)));
         uint256 balanceBefore1 = MockERC20(Currency.unwrap(key.currency1)).balanceOf(address((this)));
 
+        // Verify initial states
         assertEq(recipient.balance, 0);
         assertEq(address(hook).balance, 1 ether);
-        // 6. Execute private swap
+
+        // Execute private swap
         swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), proofData);
 
+        // Verify final balances and states
         uint256 balanceAfter0 = MockERC20(Currency.unwrap(key.currency0)).balanceOf(address((this)));
         uint256 balanceAfter1 = MockERC20(Currency.unwrap(key.currency1)).balanceOf(address((this)));
 
         assertEq(recipient.balance, 0);
         assertEq(1e18, balanceBefore0 - balanceAfter0);
-        assertEq(address(mixer).balance, 0);
 
-        assertTrue(hook.isSpent(nullifierHash)); // Nullifier should be marked as spent
+        assertTrue(hook.isSpent(nullifierHash));
     }
 
+    /*
+     * Tests token deposit functionality
+     * Verifies:
+     * - Token transfer works correctly
+     * - ETH conversion is handled properly
+     * - Commitment is stored
+     * - Balances are updated correctly
+     */
     function test_token_deposit() public {
-        // Generate commitment
         (bytes32 commitment, bytes32 nullifier, bytes32 secret) = _getCommitment();
 
-        // Mint some tokens to the test contract
+        // Setup test tokens
         MockERC20(Currency.unwrap(token0)).mint(address(this), 10e18);
-
-        // Approve tokens
         MockERC20(Currency.unwrap(token0)).approve(address(hook), 10e18);
 
-        // Record balances before deposit
+        // Record initial balances
         uint256 hookETHBefore = address(hook).balance;
         uint256 userTokensBefore = MockERC20(Currency.unwrap(token0)).balanceOf(address(this));
 
-        // Make deposit
+        // Make token deposit
         hook.deposit(token0, 1e18, commitment);
 
-        // Verify deposit succeeded
+        // Verify deposit state
         assertTrue(hook.commitments(commitment));
 
-        // Verify balances changed correctly
+        // Verify balance changes
         assertEq(address(hook).balance - hookETHBefore, 1 ether);
         assertEq(userTokensBefore - MockERC20(Currency.unwrap(token0)).balanceOf(address(this)), 1e18);
+    }
+
+    /*
+     * Tests regular non zk CSMM swap functionality
+     */
+    function test_regular_csmm_swap() public {
+        PoolSwapTest.TestSettings memory settings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+
+        // Swap exact output 100 Token A
+        uint256 balanceOfTokenABefore = key.currency0.balanceOfSelf();
+        uint256 balanceOfTokenBBefore = key.currency1.balanceOfSelf();
+        swapRouter.swap(
+            key,
+            IPoolManager.SwapParams({
+                zeroForOne: true,
+                amountSpecified: 100e18,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            settings,
+            ZERO_BYTES
+        );
+        uint256 balanceOfTokenAAfter = key.currency0.balanceOfSelf();
+        uint256 balanceOfTokenBAfter = key.currency1.balanceOfSelf();
+
+        assertEq(balanceOfTokenBAfter - balanceOfTokenBBefore, 100e18);
+        assertEq(balanceOfTokenABefore - balanceOfTokenAAfter, 100e18);
     }
 }

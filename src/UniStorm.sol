@@ -34,9 +34,6 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
     using CurrencySettler for Currency;
 
     // Errors
-    error InvalidOrder();
-    error NothingToClaim();
-    error NotEnoughToClaim();
     error AddLiquidityThroughHook();
     error SwapFailed();
 
@@ -108,7 +105,13 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
         });
     }
 
-    // Disable adding liquidity through the PM
+    /*
+     * Prevents direct liquidity addition through the pool manager
+     * Forces all liquidity operations to go through our privacy-preserving logic
+     * @param key Pool identifier
+     * @param params Liquidity parameters
+     * @return bytes4 Function selector
+     */
     function beforeAddLiquidity(address, PoolKey calldata, IPoolManager.ModifyLiquidityParams calldata, bytes calldata)
         external
         pure
@@ -118,38 +121,63 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
         revert AddLiquidityThroughHook();
     }
 
-    // Custom add liquidity function
+    /*
+     * Custom liquidity addition function that preserves privacy
+     * Handles token transfers and pool updates while maintaining anonymity
+     * @param key Pool identifier
+     * @param amountEach Amount of each token to add as liquidity
+     */
     function addLiquidity(PoolKey calldata key, uint256 amountEach) external {
         poolManager.unlock(abi.encode(CallbackData(amountEach, key.currency0, key.currency1, msg.sender)));
     }
 
+    /*
+     * Internal function to process withdrawals in the privacy system
+     * Handles ETH transfers to recipients and relayers while maintaining privacy
+     * @param _recipient Address to receive withdrawn funds
+     * @param _relayer Optional relayer address for gas compensation
+     * @param _fee Fee paid to relayer
+     * @param _refund Additional refund amount
+     */
     function _processWithdraw(address _recipient, address _relayer, uint256 _fee, uint256 _refund) internal override {
+        // Ensure no ETH is sent with withdrawal processing
         require(msg.value == 0, "Message value is supposed to be zero for ETH instance");
         require(_refund == 0, "Refund value is supposed to be zero for ETH instance");
 
-        // If recipient is this contract, skip the transfer since we already have the ETH
+        // Skip transfer if recipient is this contract (internal operation)
         if (_recipient != address(this)) {
             (bool success,) = _recipient.call{value: denomination - _fee}("");
             require(success, "payment to _recipient did not go thru");
         }
 
+        // Process relayer fee if applicable
         if (_fee > 0 && _relayer != address(0)) {
             (bool success,) = _relayer.call{value: _fee}("");
             require(success, "payment to _relayer did not go thru");
         }
     }
 
+    /*
+     * Internal function to process deposits into the privacy system
+     * Ensures correct ETH amount is provided with deposit
+     */
     function _processDeposit() internal override {
         require(msg.value == denomination, "Please send `mixDenomination` ETH along with transaction");
     }
 
-    // External deposit function that takes both token and commitment
-    // Modified deposit function to handle both ETH and token0 deposits
+    /*
+     * Main deposit function handling both ETH and token deposits
+     * Converts token deposits to ETH and stores commitment information
+     * @param token Currency being deposited
+     * @param amount Amount of currency to deposit
+     * @param commitment Zero-knowledge commitment for privacy preservation
+     */
     function deposit(Currency token, uint256 amount, bytes32 commitment) external payable nonReentrant {
+        // Verify commitment hasn't been used
         require(!commitments[commitment], "The commitment has been submitted");
         require(!deposits[token][commitment].isDeposited, "Token commitment already exists");
 
-        // Get the leaf index from merkle tree insertion
+        // Add commitment to Merkle tree
         uint32 insertedIndex = _insert(commitment);
         commitments[commitment] = true;
 
@@ -159,17 +187,14 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
             require(amount == denomination, "Amount must match denomination for ETH");
             _processDeposit();
         }
-        // Handle token0 deposits
+        // Handle token deposits
         else {
             require(msg.value == 0, "ETH not accepted for token deposits");
 
-            // Transfer tokens from user to this contract
+            // Transfer and swap tokens to ETH
             IERC20(Currency.unwrap(token)).transferFrom(msg.sender, address(this), amount);
-
-            // Approve swapper to spend our tokens
             IERC20(Currency.unwrap(token)).approve(address(swapper), amount);
 
-            // Swap tokens for ETH
             try swapper.swapTokenForETH(amount) {
                 require(address(this).balance >= denomination, "Insufficient ETH after swap");
             } catch {
@@ -177,7 +202,7 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
             }
         }
 
-        // Store deposit information
+        // Record deposit details
         deposits[token][commitment] = Deposits({
             amount: amount,
             commitment: commitment,
@@ -186,11 +211,16 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
             timestamp: block.timestamp
         });
 
-        // Emit deposit event
+        // Emit deposit event for indexing
         Tornado._emit_deposit(commitment, insertedIndex);
     }
 
-    // Handle private swap (withdrawal) with zero-knowledge proof
+    /*
+     * Verifies zero-knowledge proof and checks nullifier status
+     * Prevents double-spending and ensures transaction privacy
+     * @param state Current swap state containing proof components
+     * @return bool Indicates if proof is valid
+     */
     function verifyProofAndNullifier(SwapState memory state) internal view returns (bool) {
         require(!nullifierHashes[state.nullifierHash], "Note has been spent");
         require(isKnownRoot(state.root), "Invalid root");
@@ -210,18 +240,23 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
         );
     }
 
-    // Move swap execution to a separate function
+    /*
+     * Executes the actual token swap after privacy verification
+     * Handles currency settlement and updates pool state
+     * @param state Current swap state
+     * @param key Pool identifier
+     * @param params Swap parameters
+     * @return BeforeSwapDelta Computed swap amounts
+     */
     function executeSwap(SwapState memory state, PoolKey calldata key, IPoolManager.SwapParams calldata params)
         internal
         returns (BeforeSwapDelta)
     {
-        console.log("in executeSwap");
         uint256 amount = state.amountInOutPositive;
-        console.log("Contract ETH balance:", address(this).balance);
 
+        // Handle token transfers based on swap direction
         if (params.zeroForOne) {
             key.currency0.take(poolManager, address(this), state.amountInOutPositive, true);
-
             key.currency1.settle(poolManager, address(this), state.amountInOutPositive, true);
         } else {
             key.currency0.settle(poolManager, address(this), state.amountInOutPositive, true);
@@ -231,6 +266,16 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
         return toBeforeSwapDelta(int128(-params.amountSpecified), int128(params.amountSpecified));
     }
 
+    /*
+     * Processes private swaps with zero-knowledge proof verification
+     * Coordinates the entire private swap flow including proof verification,
+     * token swapping, and state updates
+     * @param sender Transaction initiator
+     * @param key Pool identifier
+     * @param params Swap parameters
+     * @param proofData Zero-knowledge proof components
+     * @return Function selector and swap amounts
+     */
     function handlePrivateSwap(
         address sender,
         PoolKey calldata key,
@@ -239,41 +284,26 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
     ) internal returns (bytes4, BeforeSwapDelta, uint24) {
         SwapState memory state;
 
-        // Decode proof data
+        // Decode proof components
         (state.pA, state.pB, state.pC, state.root, state.nullifierHash, state.recipient, state.relayer) =
             abi.decode(proofData, (uint256[2], uint256[2][2], uint256[2], bytes32, bytes32, address, address));
 
-        console.log("beofre invalid, before bal", address(this).balance);
-        // Verify proof
+        // Verify proof validity
         require(verifyProofAndNullifier(state), "Invalid proof");
 
-        // Mark nullifier as spent
+        // Mark nullifier as spent to prevent reuse
         nullifierHashes[state.nullifierHash] = true;
 
-        // Process ETH withdrawal
+        // Process the withdrawal
         _processWithdraw(address(this), address(0), 0, 0);
 
-        console.log(
-            "bal before token0 eth",
-            IERC20(Currency.unwrap(key.currency0)).balanceOf(address((this))),
-            address(this).balance
-        );
-
-        // Perform the token0 to ETH swap
+        // Convert ETH to tokens
         swapper.swapETHForToken{value: denomination}();
 
-        console.log(
-            "bal before token0 eth",
-            IERC20(Currency.unwrap(key.currency0)).balanceOf(address(this)),
-            address(this).balance
-        );
-        console.log("after _processWithdraw", address(this).balance);
-
-        // Calculate swap amount
+        // Calculate and execute swap
         state.amountInOutPositive =
             params.amountSpecified > 0 ? uint256(params.amountSpecified) : uint256(-params.amountSpecified);
 
-        // Execute swap
         BeforeSwapDelta delta = executeSwap(state, key, params);
 
         // Emit withdrawal event
@@ -282,31 +312,35 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
         return (this.beforeSwap.selector, delta, 0);
     }
 
+    /*
+     * Callback handler for unlocked pool operations
+     * Processes token settlements during liquidity operations
+     * @param data Encoded callback parameters
+     * @return Empty bytes for interface compliance
+     */
     function _unlockCallback(bytes calldata data) internal override returns (bytes memory) {
         CallbackData memory callbackData = abi.decode(data, (CallbackData));
 
-        // Settle `amountEach` of each currency from the sender
-        // i.e. Create a debit of `amountEach` of each currency with the Pool Manager
-        callbackData.currency0.settle(
-            poolManager,
-            callbackData.sender,
-            callbackData.amountEach,
-            false // `burn` = `false` i.e. we're actually transferring tokens, not burning ERC-6909 Claim Tokens
-        );
+        // Settle tokens from sender
+        callbackData.currency0.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
         callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
 
-        callbackData.currency0.take(
-            poolManager,
-            address(this),
-            callbackData.amountEach,
-            true // true = mint claim tokens for the hook, equivalent to money we just deposited to the PM
-        );
+        // Take tokens for the hook
+        callbackData.currency0.take(poolManager, address(this), callbackData.amountEach, true);
         callbackData.currency1.take(poolManager, address(this), callbackData.amountEach, true);
 
         return "";
     }
 
-    // Modified beforeSwap to handle private withdrawals
+    /*
+     * Pre-swap hook handler
+     * Routes transactions to either private or public swap logic
+     * @param sender Transaction initiator
+     * @param key Pool identifier
+     * @param params Swap parameters
+     * @param data Additional swap data (includes proof for private swaps)
+     * @return Function selector and swap amounts
+     */
     function beforeSwap(
         address sender,
         PoolKey calldata key,
@@ -314,13 +348,30 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
         bytes calldata data
     ) external override returns (bytes4, BeforeSwapDelta, uint24) {
         if (data.length >= 10) {
-            console.log("efmofmoe");
-            // This is a withdrawal/private swap
+            // Handle private swap with proof verification
             return handlePrivateSwap(sender, key, params, data);
         }
 
-        // Regular swap logic here if needed
-        revert("Regular swaps not supported");
+        // Handle regular swaps
+        uint256 amountIn =
+            params.amountSpecified > 0 ? uint256(params.amountSpecified) : uint256(-params.amountSpecified);
+
+        uint256 amountInOutPositive =
+            params.amountSpecified > 0 ? uint256(params.amountSpecified) : uint256(-params.amountSpecified);
+
+        BeforeSwapDelta beforeSwapDelta =
+            toBeforeSwapDelta(int128(-params.amountSpecified), int128(params.amountSpecified));
+
+        if (params.zeroForOne) {
+            key.currency0.take(poolManager, address(this), amountInOutPositive, true);
+
+            key.currency1.settle(poolManager, address(this), amountInOutPositive, true);
+        } else {
+            key.currency0.settle(poolManager, address(this), amountInOutPositive, true);
+            key.currency1.take(poolManager, address(this), amountInOutPositive, true);
+        }
+
+        return (this.beforeSwap.selector, beforeSwapDelta, 0);
     }
 
     // Simple receive function to accept ETH payments
