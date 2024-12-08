@@ -220,39 +220,50 @@ contract UniStormTest is Test, Deployers {
      * 4. Verify balances and state changes
      */
     function test_private_eth_swap_flow() public {
-        // Generate commitment and deposit ETH
+        // 1. Generate commitment and make deposit
         (bytes32 commitment, bytes32 nullifier, bytes32 secret) = _getCommitment();
         hook.deposit{value: 1 ether}(Currency.wrap(address(0)), 1 ether, commitment);
 
-        // Generate proof for withdrawal
+        // 2. Generate witness and proof
         bytes32[] memory leaves = new bytes32[](1);
         leaves[0] = commitment;
-
         (uint256[2] memory pA, uint256[2][2] memory pB, uint256[2] memory pC, bytes32 root, bytes32 nullifierHash) =
             _getWitnessAndProof(nullifier, secret, recipient, relayer, leaves);
 
-        // Prepare swap parameters
+        // 3. Verify proof against the verifier contract
+        assertTrue(
+            verifier.verifyProof(
+                pA,
+                pB,
+                pC,
+                [
+                    uint256(root),
+                    uint256(nullifierHash),
+                    uint256(uint160(recipient)),
+                    uint256(uint160(relayer)),
+                    fee,
+                    refund
+                ]
+            )
+        );
+
+        // 4. Execute private swap
         IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
             zeroForOne: true,
             amountSpecified: -1e18,
             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
         });
 
-        // Encode proof data
         bytes memory proofData = abi.encode(pA, pB, pC, root, nullifierHash, recipient, relayer);
 
-        // Record initial balances
         uint256 balanceBefore0 = MockERC20(Currency.unwrap(key.currency0)).balanceOf(address((this)));
         uint256 balanceBefore1 = MockERC20(Currency.unwrap(key.currency1)).balanceOf(address((this)));
 
-        // Verify initial states
         assertEq(recipient.balance, 0);
         assertEq(address(hook).balance, 1 ether);
 
-        // Execute private swap
         swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), proofData);
 
-        // Verify final balances and states
         uint256 balanceAfter0 = MockERC20(Currency.unwrap(key.currency0)).balanceOf(address((this)));
         uint256 balanceAfter1 = MockERC20(Currency.unwrap(key.currency1)).balanceOf(address((this)));
 
@@ -317,5 +328,89 @@ contract UniStormTest is Test, Deployers {
 
         assertEq(balanceOfTokenBAfter - balanceOfTokenBBefore, 100e18);
         assertEq(balanceOfTokenABefore - balanceOfTokenAAfter, 100e18);
+    }
+
+    /*
+     * Tests multiple deposits 
+     */
+    function test_multiple_deposits_and_swaps() public {
+        // 1. Setup initial state and prepare storage for test
+        MockERC20(Currency.unwrap(token0)).mint(address(this), 10 ether);
+        MockERC20(Currency.unwrap(token0)).approve(address(hook), 10 ether);
+
+        bytes32[] memory commitments = new bytes32[](5);
+        bytes32[] memory nullifiers = new bytes32[](5);
+        bytes32[] memory secrets = new bytes32[](5);
+
+        // 2. Make initial deposits (0-3)
+        for (uint256 i = 0; i < 4; i++) {
+            (bytes32 commitment, bytes32 nullifier, bytes32 secret) = _getCommitment();
+            commitments[i] = commitment;
+            nullifiers[i] = nullifier;
+            secrets[i] = secret;
+
+            if (i % 2 == 0) {
+                hook.deposit{value: 1 ether}(Currency.wrap(address(0)), 1 ether, commitment);
+            } else {
+                hook.deposit(token0, 1 ether, commitment);
+            }
+        }
+
+        // 3. Make target deposit that we'll use for testing
+        (bytes32 targetCommitment, bytes32 targetNullifier, bytes32 targetSecret) = _getCommitment();
+        commitments[4] = targetCommitment;
+        nullifiers[4] = targetNullifier;
+        secrets[4] = targetSecret;
+
+        hook.deposit{value: 1 ether}(Currency.wrap(address(0)), 1 ether, targetCommitment);
+
+        // 4. Generate witness and proof for target deposit
+        (uint256[2] memory pA, uint256[2][2] memory pB, uint256[2] memory pC, bytes32 root, bytes32 nullifierHash) =
+            _getWitnessAndProof(targetNullifier, targetSecret, recipient, relayer, commitments);
+
+        // 5. Verify proof against the verifier contract
+        assertTrue(
+            verifier.verifyProof(
+                pA,
+                pB,
+                pC,
+                [
+                    uint256(root),
+                    uint256(nullifierHash),
+                    uint256(uint160(recipient)),
+                    uint256(uint160(relayer)),
+                    fee,
+                    refund
+                ]
+            )
+        );
+
+        // 6. Prepare and execute private swap
+        uint256 initialToken0Balance = MockERC20(Currency.unwrap(token0)).balanceOf(address(this));
+
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: true,
+            amountSpecified: -1e18,
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
+
+        bytes memory proofData = abi.encode(pA, pB, pC, root, nullifierHash, recipient, relayer);
+
+        swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), proofData);
+
+        // 7. Verify swap results and privacy guarantees
+        assertTrue(hook.isSpent(nullifierHash), "Nullifier should be marked as spent");
+        assertTrue(hook.isKnownRoot(root), "Root should be recognized");
+
+        uint256 finalToken0Balance = MockERC20(Currency.unwrap(token0)).balanceOf(address(this));
+        if (initialToken0Balance > finalToken0Balance) {
+            assertEq(initialToken0Balance - finalToken0Balance, 1e18, "Incorrect token balance decrease");
+        } else {
+            assertEq(finalToken0Balance - initialToken0Balance, 1e18, "Incorrect token balance increase");
+        }
+
+        // 8. Verify double-spend protection
+        vm.expectRevert();
+        swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), proofData);
     }
 }

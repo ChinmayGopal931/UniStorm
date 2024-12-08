@@ -22,9 +22,9 @@ import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 
 import {FixedPointMathLib} from "solmate/src/utils/FixedPointMathLib.sol";
+import {WETH} from "./WETH.sol";
 
 import "./Tornado.sol";
-import {WETH} from "./WETH.sol";
 
 contract UniStorm is BaseHook, ERC1155, Tornado {
     using StateLibrary for IPoolManager;
