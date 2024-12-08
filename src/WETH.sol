@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract TokenETHSwapper {
+contract WETH {
     // The ERC20 token that will be swapped with ETH
     IERC20 public immutable token0;
 

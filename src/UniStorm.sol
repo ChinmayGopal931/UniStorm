@@ -24,7 +24,7 @@ import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {FixedPointMathLib} from "solmate/src/utils/FixedPointMathLib.sol";
 
 import "./Tornado.sol";
-import {TokenETHSwapper} from "./WETH.sol";
+import {WETH} from "./WETH.sol";
 
 contract UniStorm is BaseHook, ERC1155, Tornado {
     using StateLibrary for IPoolManager;
@@ -41,7 +41,7 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
     event ETHReceived(uint256 amount);
     event TokenDeposited(Currency token, uint256 amount, uint256 ethReceived);
 
-    TokenETHSwapper public immutable swapper;
+    WETH public immutable weth;
 
     struct Deposits {
         uint256 amount;
@@ -80,9 +80,9 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
         IHasher _hasher,
         uint256 _denomination,
         uint32 _merkleTreeHeight,
-        TokenETHSwapper _swapper
+        WETH _weth
     ) BaseHook(_manager) ERC1155(_uri) Tornado(_verifier, _hasher, _denomination, _merkleTreeHeight) {
-        swapper = _swapper;
+        weth = _weth;
     }
 
     // BaseHook Functions
@@ -193,9 +193,9 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
 
             // Transfer and swap tokens to ETH
             IERC20(Currency.unwrap(token)).transferFrom(msg.sender, address(this), amount);
-            IERC20(Currency.unwrap(token)).approve(address(swapper), amount);
+            IERC20(Currency.unwrap(token)).approve(address(weth), amount);
 
-            try swapper.swapTokenForETH(amount) {
+            try weth.swapTokenForETH(amount) {
                 require(address(this).balance >= denomination, "Insufficient ETH after swap");
             } catch {
                 revert SwapFailed();
@@ -298,7 +298,7 @@ contract UniStorm is BaseHook, ERC1155, Tornado {
         _processWithdraw(address(this), address(0), 0, 0);
 
         // Convert ETH to tokens
-        swapper.swapETHForToken{value: denomination}();
+        weth.swapETHForToken{value: denomination}();
 
         // Calculate and execute swap
         state.amountInOutPositive =

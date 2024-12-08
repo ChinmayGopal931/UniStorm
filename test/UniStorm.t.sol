@@ -20,7 +20,7 @@ import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {IERC20Minimal} from "v4-core/interfaces/external/IERC20Minimal.sol";
 
 import {UniStorm} from "../src/UniStorm.sol";
-import {TokenETHSwapper} from "../src/WETH.sol";
+import {WETH} from "../src/WETH.sol";
 
 import {Groth16Verifier} from "src/Verifier.sol";
 import {IVerifier, IHasher} from "src/Tornado.sol";
@@ -54,7 +54,7 @@ contract UniStormTest is Test, Deployers {
 
     // Core contracts
     UniStorm hook; // Our privacy-preserving hook
-    TokenETHSwapper public swapper; // Handles token-ETH conversions
+    WETH public weth; // Handles token-ETH conversions
 
     /*
      * Test setup: Deploys all necessary contracts and initializes the testing environment
@@ -87,9 +87,9 @@ contract UniStormTest is Test, Deployers {
         (token0, token1) = deployMintAndApprove2Currencies();
 
         // Initialize token-ETH swapper and fund it
-        swapper = new TokenETHSwapper(Currency.unwrap(token0));
-        vm.deal(address(swapper), 100 ether);
-        MockERC20(Currency.unwrap(token0)).mint(address(swapper), 100 ether);
+        weth = new WETH(Currency.unwrap(token0));
+        vm.deal(address(weth), 100 ether);
+        MockERC20(Currency.unwrap(token0)).mint(address(weth), 100 ether);
 
         // Configure hook permissions - only allow specific operations
         uint160 flags =
@@ -98,9 +98,7 @@ contract UniStormTest is Test, Deployers {
 
         // Deploy UniStorm hook with all necessary parameters
         deployCodeTo(
-            "UniStorm.sol",
-            abi.encode(manager, "", verifier, IHasher(mimcHasher), 1 ether, 20, swapper, 1e18),
-            hookAddress
+            "UniStorm.sol", abi.encode(manager, "", verifier, IHasher(mimcHasher), 1 ether, 20, weth, 1e18), hookAddress
         );
 
         hook = UniStorm(hookAddress);
