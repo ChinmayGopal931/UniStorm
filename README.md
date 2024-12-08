@@ -1,4 +1,4 @@
-# Tornado Cash [Re-built]
+# UniStorm
 
 Tornado Cash is a non-custodial Ethereum and ERC20 privacy solution based on zkSNARKs.
 
@@ -18,7 +18,7 @@ Install dependencies:
 forge install
 ```
 
-```bash
+```bashs
 yarn
 ```
 
@@ -53,4 +53,3 @@ forge test
 
 Tornado Cash rebuilt by https://github.com/nkrishang here https://github.com/nkrishang/tornado-cash-rebuilt/
 
-# UniStorm
