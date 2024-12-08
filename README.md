@@ -1,25 +1,123 @@
 # UniStorm: Privacy-Preserving Swaps on Uniswap v4
 
+---
+
 ## Project Overview  
-**UniStorm** enables private token swaps by combining Uniswap v4's hook system with zero-knowledge proofs. Built on the privacy foundations of Tornado Cash, it allows users to trade tokens without revealing their identity or trading patterns.
+
+**UniStorm** is a privacy-preserving protocol built on **Uniswap V4** that combines the power of zero-knowledge proofs inspired by **Tornado Cash**. It enables private token swaps while maintaining the security and efficiency of Uniswap's liquidity pools.
 
 ---
 
+## Overview  
 
-## Core Benefits  
-
-### Privacy  
-- Ensures **complete trading anonymity** by breaking the on-chain link between deposits and swaps using zero-knowledge proofs.
-
-### Security  
-- Built on **Uniswap v4's battle-tested smart contracts** and enhanced with Tornado Cash's proven privacy technology.  
-- Provides institutional-grade security for private trading.
-
-### Permissionless & Composable  
-- Any token tradable on Uniswap v4 can be privately swapped through UniStorm.  
-- No gatekeepers or restrictions.
+UniStorm extends Tornado Cash's privacy mechanism to work with Uniswap V4's hook system, creating a hybrid protocol that allows users to perform **private token swaps**. The protocol uses **zero-knowledge proofs (ZKPs)** to break the on-chain link between deposit and withdrawal addresses while leveraging Uniswap V4's liquidity pools for token exchanges.
 
 ---
+
+## Technical Architecture  
+
+### Core Components  
+
+1. **Privacy Mechanism**  
+   - Implements **Tornado Cash's commitment-nullifier scheme**  
+   - Uses a **Merkle tree** to store deposit commitments  
+   - Employs **zero-knowledge proofs** for private withdrawals  
+   - Maintains **denomination pools** for standardized amounts  
+
+2. **Uniswap V4 Integration**  
+   - Implements **BaseHook** for custom swap logic  
+   - Manages liquidity through **hook-controlled deposits**  
+   - Handles **currency settlement** and pool state updates  
+   - Provides both **private** and **public swap paths**  
+
+---
+
+### Key Data Structures  
+
+```solidity
+struct Deposits {
+    uint256 amount;
+    bytes32 commitment;
+    bool isDeposited;
+    Currency token;
+    uint256 timestamp;
+}
+
+struct SwapState {
+    uint256[2] pA;
+    uint256[2][2] pB;
+    uint256[2] pC;
+    bytes32 root;
+    bytes32 nullifierHash;
+    address recipient;
+    address relayer;
+    uint256 amountInOutPositive;
+}
+```
+
+### Technical Flow
+
+Protocol Flow
+1. Deposit Process
+- User generates random nullifier and secret values.
+- Creates a commitment (hash of nullifier and secret).
+- Deposits tokens along with the commitment.
+- Protocol converts tokens to ETH if necessary.
+- Commitment is stored in the Merkle tree.
+- Deposit details are recorded with a timestamp.
+
+2. Private Swap Process
+- User generates a zero-knowledge proof of deposit ownership.
+- Submits proof along with desired swap parameters.
+- Protocol verifies:
+    - Proof validity
+    - Nullifier hasn't been spent
+    - Merkle root is valid
+
+- If verification succeeds:
+    - Marks nullifier as spent
+    - Converts ETH back to tokens
+    - Executes swap through Uniswap V4
+    - Updates pool state
+    - Settles currencies
+
+
+Security Features
+Zero-Knowledge Privacy
+
+- Breaks on-chain links between deposits and withdrawals
+     - Uses Groth16 proof system
+        Implements nullifier tracking to prevent double-spending
+        Pool Security
+
+    -   Enforces hook-controlled liquidity additions
+        Maintains standardized denomination amounts
+        Implements reentrancy protection
+        Verifies all proofs before execution
+        Economic Security
+
+
+
+
+#Key Functions
+ - `deposit(Currency token, uint256 amount, bytes32 commitment)`
+
+        Handles initial token deposits
+        Converts tokens to ETH if necessary
+        Stores commitment in Merkle tree
+
+- `beforeSwap(address sender, PoolKey key, IPoolManager.SwapParams params, bytes data)`
+
+    Routes between private and public swaps
+    Handles proof verification for private swaps
+    Manages currency settlements
+
+- `verifyProofAndNullifier(SwapState memory state)`
+    
+    Validates zero-knowledge proofs
+    Checks nullifier status
+    Verifies Merkle root
+
 
 
 ## Installation & Setup  
@@ -78,4 +176,3 @@ forge test
 ## Credits
 
 Tornado Cash rebuilt by https://github.com/nkrishang here https://github.com/nkrishang/tornado-cash-rebuilt/
-
