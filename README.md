@@ -1,8 +1,32 @@
-# UniStorm
+# UniStorm: Privacy-Preserving Swaps on Uniswap v4
 
-Tornado Cash is a non-custodial Ethereum and ERC20 privacy solution based on zkSNARKs.
+## Project Overview  
+**UniStorm** enables private token swaps by combining Uniswap v4's hook system with zero-knowledge proofs. Built on the privacy foundations of Tornado Cash, it allows users to trade tokens without revealing their identity or trading patterns.
 
-The Original Tornado Cash repository (https://github.com/tornadocash/tornado-core) 
+---
+
+
+## Core Benefits  
+
+### Privacy  
+- Ensures **complete trading anonymity** by breaking the on-chain link between deposits and swaps using zero-knowledge proofs.
+
+### Security  
+- Built on **Uniswap v4's battle-tested smart contracts** and enhanced with Tornado Cash's proven privacy technology.  
+- Provides institutional-grade security for private trading.
+
+### Permissionless & Composable  
+- Any token tradable on Uniswap v4 can be privately swapped through UniStorm.  
+- No gatekeepers or restrictions.
+
+---
+
+
+## Installation & Setup  
+
+### Clone the Repository  
+```bash
+git clone https://github.com/ChinmayGopal931/UniStorm.git
 
 ## Installation
 
@@ -48,6 +72,8 @@ Run the following command to run tests (_after_ you have generated circuit artif
 ```bash
 forge test
 ```
+<img width="591" alt="Screenshot 2024-12-08 at 8 47 29 AM" src="https://github.com/user-attachments/assets/7b5905a7-d811-4601-84ac-be30c29aa998">
+
 
 ## Credits
 
