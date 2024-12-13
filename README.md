@@ -1,7 +1,8 @@
 # UniStorm: Privacy-Preserving Swaps on Uniswap v4
 
+![DALL·E 2024-12-08 08 17 39 - A modern, vectorized logo blending Uniswap's iconic unicorn emblem with the swirling tornado design of Tornado Cash  The unicorn emerges dynamically f-min 2](https://github.com/user-attachments/assets/b3febd84-30b2-4bb8-9f41-d4910dad01e5)
 
-Video: https://www.youtube.com/watch?v=ReAM0Zc1-xY
+
 
 
 Deck: https://gamma.app/docs/UniStorm-t4964wzmw9vl1hp
