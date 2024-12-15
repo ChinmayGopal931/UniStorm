@@ -11,14 +11,13 @@ Deck: https://gamma.app/docs/UniStorm-t4964wzmw9vl1hp
 
 ## Project Overview  
 
-**UniStorm** is a privacy-preserving protocol built on **Uniswap V4** that combines the power of zero-knowledge proofs inspired by **Tornado Cash**. It enables private token swaps while maintaining the security and efficiency of Uniswap's liquidity pools.
+UniStorm is a protocol that integrates Tornado Cash with Uniswap v4, utilizing zk-Snarks to facilitate private token swaps.
 
 ---
 
 ## Overview  
 
-UniStorm extends Tornado Cash's privacy mechanism to work with Uniswap V4's hook system, creating a hybrid protocol that allows users to perform **private token swaps**. The protocol uses **zero-knowledge proofs (ZKPs)** to break the on-chain link between deposit and withdrawal addresses while leveraging Uniswap V4's liquidity pools for token exchanges.
-
+UniStorm extends the functionality of Tornado Cash by incorporating it into Uniswap v4's hook system. Users can deposit tokens and receive their deposits back when they perform a swap, provided they present a valid proof. This integration allows for the separation of deposit and withdrawal addresses, enhancing transaction privacy while utilizing Uniswap v4's liquidity pools.
 ---
 
 ## Technical Architecture  
