@@ -20,7 +20,7 @@ UniStorm is a protocol that integrates Tornado Cash with Uniswap v4, utilizing z
 UniStorm extends the functionality of Tornado Cash by incorporating it into Uniswap v4's hook system. Users can deposit tokens and receive their deposits back when they perform a swap, provided they present a valid proof. This integration allows for the separation of deposit and withdrawal addresses, enhancing transaction privacy while utilizing Uniswap v4's liquidity pools.
 ---
 
-## Technical Architecture  
+## Architecture  
 
 ### Core Components  
 
@@ -61,7 +61,7 @@ struct SwapState {
 }
 ```
 
-### Technical Flow
+### Flow
 
 Protocol Flow
 1. Deposit Process
